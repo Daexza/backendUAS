@@ -5,18 +5,18 @@ import (
 	"achievements-uas/models"
 )
 
-type UserAdminRepository struct {
+type AdminRepository struct {
 	DB *sql.DB
 }
 
-func NewUserAdminRepository(db *sql.DB) *UserAdminRepository {
-	return &UserAdminRepository{DB: db}
+func NewAdminRepository(db *sql.DB) *AdminRepository {
+	return &AdminRepository{DB: db}
 }
 
 // ------------------------------------------------------
 // CREATE USER
 // ------------------------------------------------------
-func (r *UserAdminRepository) CreateUser(u *models.User) error {
+func (r *AdminRepository) CreateUser(u *models.User) error {
 	q := `
 		INSERT INTO users (id, username, email, password_hash, full_name, role_id, is_active, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
@@ -31,7 +31,7 @@ func (r *UserAdminRepository) CreateUser(u *models.User) error {
 // ------------------------------------------------------
 // GET ALL USERS
 // ------------------------------------------------------
-func (r *UserAdminRepository) GetAllUsers() ([]models.User, error) {
+func (r *AdminRepository) GetAllUsers() ([]models.User, error) {
 	q := `
 		SELECT id, username, email, full_name, role_id, is_active, created_at, updated_at
 		FROM users
@@ -61,7 +61,7 @@ func (r *UserAdminRepository) GetAllUsers() ([]models.User, error) {
 // ------------------------------------------------------
 // GET USER BY ID
 // ------------------------------------------------------
-func (r *UserAdminRepository) GetByID(id string) (*models.User, error) {
+func (r *AdminRepository) GetByID(id string) (*models.User, error) {
 	q := `
 		SELECT id, username, email, full_name, role_id, is_active, created_at, updated_at
 		FROM users
@@ -82,7 +82,7 @@ func (r *UserAdminRepository) GetByID(id string) (*models.User, error) {
 // ------------------------------------------------------
 // UPDATE USER INFO
 // ------------------------------------------------------
-func (r *UserAdminRepository) UpdateUser(u *models.User) error {
+func (r *AdminRepository) UpdateUser(u *models.User) error {
 	q := `
 		UPDATE users
 		SET username=$2, email=$3, full_name=$4, role_id=$5, is_active=$6, updated_at=NOW()
@@ -98,7 +98,7 @@ func (r *UserAdminRepository) UpdateUser(u *models.User) error {
 // ------------------------------------------------------
 // DELETE USER
 // ------------------------------------------------------
-func (r *UserAdminRepository) DeleteUser(id string) error {
+func (r *AdminRepository) DeleteUser(id string) error {
 	_, err := r.DB.Exec(`DELETE FROM users WHERE id=$1`, id)
 	return err
 }
@@ -106,7 +106,7 @@ func (r *UserAdminRepository) DeleteUser(id string) error {
 // ------------------------------------------------------
 // UPDATE PASSWORD (RESET PASSWORD BY ADMIN)
 // ------------------------------------------------------
-func (r *UserAdminRepository) UpdatePassword(userID, hash string) error {
+func (r *AdminRepository) UpdatePassword(userID, hash string) error {
 	q := `
 		UPDATE users
 		SET password_hash=$2, updated_at=NOW()
@@ -119,7 +119,7 @@ func (r *UserAdminRepository) UpdatePassword(userID, hash string) error {
 // ------------------------------------------------------
 // ASSIGN ROLE
 // ------------------------------------------------------
-func (r *UserAdminRepository) AssignRole(userID, roleID string) error {
+func (r *AdminRepository) AssignRole(userID, roleID string) error {
 	_, err := r.DB.Exec(`
 		UPDATE users SET role_id=$2, updated_at=NOW()
 		WHERE id=$1
@@ -130,7 +130,7 @@ func (r *UserAdminRepository) AssignRole(userID, roleID string) error {
 // ------------------------------------------------------
 // CREATE STUDENT PROFILE
 // ------------------------------------------------------
-func (r *UserAdminRepository) CreateStudent(st *models.Student) error {
+func (r *AdminRepository) CreateStudent(st *models.Student) error {
 	q := `
 		INSERT INTO students (id, user_id, student_id, program_study, academic_year, advisor_id, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,NOW())
@@ -145,7 +145,7 @@ func (r *UserAdminRepository) CreateStudent(st *models.Student) error {
 // ------------------------------------------------------
 // CREATE LECTURER PROFILE
 // ------------------------------------------------------
-func (r *UserAdminRepository) CreateLecturer(l *models.Lecturer) error {
+func (r *AdminRepository) CreateLecturer(l *models.Lecturer) error {
 	q := `
 		INSERT INTO lecturers (id, user_id, lecturer_id, department, created_at)
 		VALUES ($1,$2,$3,$4,NOW())
@@ -159,7 +159,7 @@ func (r *UserAdminRepository) CreateLecturer(l *models.Lecturer) error {
 // ------------------------------------------------------
 // SET ADVISOR FOR STUDENT
 // ------------------------------------------------------
-func (r *UserAdminRepository) SetAdvisor(studentID, advisorID string) error {
+func (r *AdminRepository) SetAdvisor(studentID, advisorID string) error {
 	_, err := r.DB.Exec(`
 		UPDATE students SET advisor_id=$2 WHERE id=$1
 	`, studentID, advisorID)

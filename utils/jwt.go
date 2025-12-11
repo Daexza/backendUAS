@@ -16,21 +16,19 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// Error untuk token invalid
 var ErrTokenInvalid = errors.New("token invalid")
 
-// ============================
-// ACCESS TOKEN
-// ============================
-func GenerateAccessToken(user *models.User) (string, error) {
+// =====================================================
+// ACCESS TOKEN – menerima PERMISSIONS dari AuthService
+// =====================================================
+func GenerateAccessToken(user *models.User, permissions []string) (string, error) {
+
 	claims := JWTClaims{
-		ID:   user.ID,
-		Role: user.RoleID,
-		Permissions: []string{
-			"user:manage", // contoh permission
-		},
+		ID:          user.ID,
+		Role:        user.RoleID,
+		Permissions: permissions,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 1)), // 1 jam
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -63,15 +61,16 @@ func ValidateAndGetUserID(tokenStr string) (string, error) {
 	return claims.ID, nil
 }
 
-// ============================
-// REFRESH TOKEN
-// ============================
+// =====================================================
+// REFRESH TOKEN – TIDAK membawa permissions
+// =====================================================
 func GenerateRefreshToken(user *models.User) (string, error) {
 	claims := JWTClaims{
 		ID:   user.ID,
 		Role: user.RoleID,
+		Permissions: nil, // refresh token tidak butuh permission
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour * 7)), // 7 hari
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour * 7)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -96,9 +95,10 @@ func ParseRefreshToken(tokenStr string) (*JWTClaims, error) {
 	return claims, nil
 }
 
-// ============================
-// BLACKLIST TOKEN (opsional)
-// ============================
+// =====================================================
+// BLACKLIST TOKEN
+// =====================================================
+
 var tokenBlacklist = make(map[string]time.Time)
 
 func BlacklistToken(token string, exp time.Time) {
