@@ -10,15 +10,11 @@ import (
 
 func AuthMiddleware(c *fiber.Ctx) error {
 	authHeader := c.Get("Authorization")
-
 	if authHeader == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"message": "Token tidak ditemukan",
-		})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "Token tidak ditemukan"})
 	}
 
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
 	secret := os.Getenv("JWT_SECRET")
 
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
@@ -26,15 +22,11 @@ func AuthMiddleware(c *fiber.Ctx) error {
 	})
 
 	if err != nil || !token.Valid {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"message": "Token tidak valid",
-		})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "Token tidak valid"})
 	}
 
 	claims := token.Claims.(jwt.MapClaims)
-
 	c.Locals("user_id", claims["id"])
 	c.Locals("role", claims["role"])
-
 	return c.Next()
 }

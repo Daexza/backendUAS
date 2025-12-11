@@ -13,62 +13,60 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var (
-	Postgres *sql.DB
-	MongoDB  *mongo.Database
-)
+var Postgres *sql.DB
+var MongoDB *mongo.Database
 
-// Koneksi PostgreSQL
-func ConnectPostgres() {
-	host := os.Getenv("PG_HOST")
-	port := os.Getenv("PG_PORT")
-	user := os.Getenv("PG_USER")
-	pass := os.Getenv("PG_PASS")
-	name := os.Getenv("PG_NAME")
+func ConnectPostgres() error {
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	user := os.Getenv("POSTGRES_USER")
+	pass := os.Getenv("POSTGRES_PASSWORD")
+	name := os.Getenv("POSTGRES_DB")
+	sslmode := os.Getenv("POSTGRES_SSLMODE")
+
+	// Validate
+	if host == "" || port == "" || user == "" || name == "" {
+		return fmt.Errorf("missing PostgreSQL environment variables")
+	}
 
 	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, pass, name,
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, pass, name, sslmode,
 	)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatal("Gagal konek PostgreSQL:", err)
+		return err
 	}
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("PostgreSQL tidak merespon:", err)
+	db.SetConnMaxLifetime(time.Minute * 3)
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(10)
+
+	if err = db.Ping(); err != nil {
+		return err
 	}
 
 	Postgres = db
-	log.Println("PostgreSQL terhubung")
+	log.Println("Postgres connected")
+	return nil
 }
 
-// Koneksi MongoDB
-func ConnectMongo() {
+
+func ConnectMongo() error {
 	uri := os.Getenv("MONGO_URI")
 	dbName := os.Getenv("MONGO_DB")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
-		log.Fatal("Gagal konek MongoDB:", err)
+		return err
 	}
-
-	err = client.Ping(ctx, nil)
-	if err != nil {
-		log.Fatal("MongoDB tidak merespon:", err)
+	if err = client.Ping(ctx, nil); err != nil {
+		return err
 	}
-
 	MongoDB = client.Database(dbName)
-	log.Println("MongoDB terhubung")
-}
-
-// Inisialisasi semua database
-func InitDatabase() {
-	ConnectPostgres()
-	ConnectMongo()
+	log.Println("MongoDB connected")
+	return nil
 }

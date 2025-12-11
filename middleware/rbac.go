@@ -1,25 +1,24 @@
 package middleware
 
-import "github.com/gofiber/fiber/v2"
+import (
+	"achievements-uas/utils"
+	"github.com/gofiber/fiber/v2"
+)
 
-func AllowRole(roles ...string) fiber.Handler {
+func RequirePermission(permission string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		userRole := c.Locals("role")
+		claimsInterface := c.Locals("claims")
+		if claimsInterface == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing claims"})
+		}
+		claims := claimsInterface.(*utils.JWTClaims)
 
-		allowed := false
-		for _, r := range roles {
-			if r == userRole {
-				allowed = true
-				break
+		for _, p := range claims.Permissions {
+			if p == permission {
+				return c.Next()
 			}
 		}
 
-		if !allowed {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"message": "Akses ditolak",
-			})
-		}
-
-		return c.Next()
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden: insufficient permissions"})
 	}
 }
