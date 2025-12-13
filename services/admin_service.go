@@ -1,8 +1,8 @@
 package services
 
 import (
-	"achievements-uas/models"
-	"achievements-uas/repositories"
+	"achievements-uas/app/models"
+	"achievements-uas/app/repository"
 	"achievements-uas/utils"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -246,4 +246,58 @@ func (s *UserAdminService) SetAdvisor(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"status": "success", "message": "advisor set"})
+}
+// ==============================================
+// GET ALL STUDENTS
+// ==============================================
+func (s *UserAdminService) GetAllStudents(c *fiber.Ctx) error {
+	list, err := s.AdminRepo.GetAllStudents()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed get students"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": list})
+}
+
+// ==============================================
+// GET STUDENT BY ID
+// ==============================================
+func (s *UserAdminService) GetStudentByID(c *fiber.Ctx) error {
+	res, err := s.AdminRepo.GetStudentByID(c.Params("id"))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "student not found"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": res})
+}
+
+// ==============================================
+// GET STUDENT ACHIEVEMENTS
+// ==============================================
+func (s *UserAdminService) GetStudentAchievements(c *fiber.Ctx) error {
+	list, err := s.AdminRepo.GetStudentAchievements(c.Params("id"))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed load achievements"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": list})
+}
+
+// ==============================================
+// GET ALL LECTURERS
+// ==============================================
+func (s *UserAdminService) GetAllLecturers(c *fiber.Ctx) error {
+	list, err := s.AdminRepo.GetAllLecturers()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed get lecturers"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": list})
+}
+
+// ==============================================
+// GET LECTURER ADVISEES
+// ==============================================
+func (s *UserAdminService) GetLecturerAdvisees(c *fiber.Ctx) error {
+	list, err := s.AdminRepo.GetLecturerAdvisees(c.Params("id"))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed get advisees"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": list})
 }

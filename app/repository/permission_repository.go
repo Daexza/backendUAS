@@ -2,7 +2,7 @@ package repository
 
 import (
 	"database/sql"
-	"achievements-uas/models"
+	"achievements-uas/app/models"
 )
 
 type PermissionRepository struct {

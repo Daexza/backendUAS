@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"achievements-uas/models"
+	"achievements-uas/app/models"
 	"errors"
 	"os"
 	"time"

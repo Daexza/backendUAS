@@ -1,7 +1,7 @@
 package services
 
 import (
-	"achievements-uas/repositories"
+	"achievements-uas/app/repository"
 	"achievements-uas/utils"
 	"github.com/gofiber/fiber/v2"
 	"net/http"
