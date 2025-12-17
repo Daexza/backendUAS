@@ -1,96 +1,91 @@
 package routes
 
 import (
-	"achievements-uas/app/repositories"
-	"achievements-uas/app/services"
-	"achievements-uas/database"
-	"achievements-uas/middleware"
+	"achievements-uas/services"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-func RegisterRoutes(app *fiber.App) {
+func SetupRoutes(
+	app *fiber.App,
+	authService *services.AuthService,
+	adminService *services.UserAdminService,
+	achievementService *services.AchievementService,
+	reportService *services.ReportService,
+) {
 
-	// ======================================
-	// INIT REPOSITORIES
-	// ======================================
-	authRepo := repositories.NewAuthRepository(database.Postgres)
-	userRepo := repositories.NewAdminRepository(database.Postgres)
-	roleRepo := repositories.NewRoleRepository(database.Postgres)
-	rolePermRepo := repositories.NewRolePermissionRepository(database.Postgres)
+	api := app.Group("/api")
+	v1 := api.Group("/v1")
 
-	studentRepo := repositories.NewStudentRepository(database.Postgres)
-	lecturerRepo := repositories.NewLecturerRepository(database.Postgres)
-	achMongoRepo := repositories.NewAchievementMongoRepository(database.Mongo)
-	achPgRepo := repositories.NewAchievementPGRepository(database.Postgres)
-
-	// ======================================
-	// INIT SERVICES
-	// ======================================
-	authService := services.NewAuthService(authRepo, rolePermRepo)
-	userService := services.NewUserAdminService(userRepo, roleRepo, rolePermRepo)
-
-	studentAchievementService := services.NewStudentAchievementService(studentRepo, achMongoRepo, achPgRepo)
-	lecturerAchievementService := services.NewLecturerAchievementService(lecturerRepo, achMongoRepo, achPgRepo)
-	achievementQueryService := services.NewAchievementQueryService(achMongoRepo, achPgRepo)
-
-	studentService := services.NewStudentService(studentRepo, achPgRepo)
-	lecturerService := services.NewLecturerService(lecturerRepo, studentRepo)
-
-	// ============================================================
-	//  AUTHENTICATION 
-	// ============================================================
-	auth := app.Group("/api/v1/auth")
+	// =====================================================
+	// AUTH
+	// FR-001
+	// =====================================================
+	auth := v1.Group("/auth")
 	auth.Post("/login", authService.Login)
 	auth.Post("/refresh", authService.Refresh)
-	auth.Post("/logout", middleware.AuthRequired(), authService.Logout)
-	auth.Get("/profile", middleware.AuthRequired(), authService.Profile)
+	auth.Post("/logout", authService.Logout)
+	auth.Get("/profile", authService.Profile)
 
-	// ============================================================
-	// USERS (ADMIN) 
-	// ============================================================
-	users := app.Group("/api/v1/users", middleware.AuthRequired())
-	users.Get("/", userService.GetAll)
-	users.Get("/:id", userService.GetByID)
-	users.Post("/", userService.Create)
-	users.Put("/:id", userService.Update)
-	users.Delete("/:id", userService.Delete)
-	users.Put("/:id/role", userService.UpdateRole)
+	// =====================================================
+	// USERS (ADMIN ONLY)
+	// FR-009: Manage Users
+	// =====================================================
+	users := v1.Group("/users")
+	users.Get("/", adminService.GetAll)
+	users.Get("/:id", adminService.GetByID)
+	users.Post("/", adminService.Create)
+	users.Put("/:id", adminService.Update)
+	users.Delete("/:id", adminService.Delete)
+	users.Put("/:id/password", adminService.UpdatePassword)
 
-	// ============================================================
-	// ACHIEVEMENTS 
-	// ============================================================
-	ach := app.Group("/api/v1/achievements", middleware.AuthRequired())
+	// =====================================================
+	// ACHIEVEMENTS
+	// FR-003 s/d FR-008, FR-012 (+ DETAIL, HISTORY, UPDATE)
+	// =====================================================
+	ach := v1.Group("/achievements")
 
-	// GENERAL
-	ach.Get("/", achievementQueryService.List)
-	ach.Get("/:id", achievementQueryService.Detail)
-	ach.Get("/:id/history", achievementQueryService.History)
+	// LIST (ROLE BASED)
+	ach.Get("/", achievementService.List)
 
-	// STUDENT ACHIEVEMENTS
-	ach.Post("/", studentAchievementService.Create)
-	ach.Put("/:id", studentAchievementService.Update)
-	ach.Delete("/:id", studentAchievementService.Delete)
-	ach.Post("/:id/submit", studentAchievementService.Submit)
-	ach.Post("/:id/attachments", studentAchievementService.UploadAttachment)
+	// DETAIL & HISTORY
+	ach.Get("/:id", achievementService.Detail)
+	ach.Get("/:id/history", achievementService.History)
 
-	// LECTURER ACHIEVEMENTS
-	ach.Post("/:id/verify", lecturerAchievementService.Verify)
-	ach.Post("/:id/reject", lecturerAchievementService.Reject)
+	// MAHASISWA
+	ach.Post("/", achievementService.Create)
+	ach.Put("/:id", achievementService.Update)
+	ach.Post("/:id/submit", achievementService.Submit)
+	ach.Delete("/:id", achievementService.Delete)
+	ach.Post("/:id/attachments", achievementService.UploadAttachment)
 
-	// ============================================================
-	// STUDENTS 
-	// ============================================================
-	st := app.Group("/api/v1/students", middleware.AuthRequired())
-	st.Get("/", studentService.GetProfileOrList)
-	st.Get("/:id", studentService.GetByID)
-	st.Get("/:id/achievements", studentService.GetAchievements)
-	st.Put("/:id/advisor", studentService.SetAdvisor)
+	// DOSEN WALI
+	ach.Post("/:id/verify", achievementService.Verify)
+	ach.Post("/:id/reject", achievementService.Reject)
 
-	// ============================================================
-	// LECTURERS 
-	// ============================================================
-	lc := app.Group("/api/v1/lecturers", middleware.AuthRequired())
-	lc.Get("/", lecturerService.GetAll)
-	lc.Get("/:id/advisees", lecturerService.GetAdvisees)
+	// =====================================================
+	// STUDENTS (ADMIN ONLY)
+	// FR-009
+	// =====================================================
+	students := v1.Group("/students")
+	students.Get("/", adminService.GetAllStudents)
+	students.Get("/:id", adminService.GetStudentByID)
+	students.Get("/:id/achievements", adminService.GetStudentAchievements)
+	students.Put("/:id/advisor", adminService.SetAdvisor)
+
+	// =====================================================
+	// LECTURERS (ADMIN ONLY)
+	// FR-006
+	// =====================================================
+	lecturers := v1.Group("/lecturers")
+	lecturers.Get("/", adminService.GetAllLecturers)
+	lecturers.Get("/:id/advisees", adminService.GetLecturerAdvisees)
+	// =====================================================
+	// REPORTS & ANALYTICS
+	// FR-011
+	// =====================================================
+	reports := v1.Group("/reports")
+	reports.Get("/statistics", reportService.Statistics)
+	reports.Get("/student/:id", reportService.StudentReport)
 }
+

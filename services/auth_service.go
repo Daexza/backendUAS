@@ -3,14 +3,14 @@ package services
 import (
 	"achievements-uas/app/repository"
 	"achievements-uas/utils"
+	"achievements-uas/middleware" 
 	"github.com/gofiber/fiber/v2"
 	"net/http"
-	"time"
 )
 
 type AuthService struct {
-	AuthRepo      *repository.AuthRepository
-	RolePermRepo  *repository.RolePermissionRepository
+	AuthRepo     *repository.AuthRepository
+	RolePermRepo *repository.RolePermissionRepository
 }
 
 func NewAuthService(
@@ -106,7 +106,6 @@ func (s *AuthService) Refresh(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "user not found"})
 	}
 
-	// PERMISSIONS DIAMBIL DARI RolePermissionRepository
 	perms, err := s.RolePermRepo.GetPermissionsByRole(user.RoleID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed fetch permissions"})
@@ -128,15 +127,20 @@ func (s *AuthService) Refresh(c *fiber.Ctx) error {
 // ========================================================
 func (s *AuthService) Logout(c *fiber.Ctx) error {
 	token := c.Locals("token").(string)
-	exp := time.Now().Add(15 * time.Minute)
+	claims := c.Locals("claims").(*utils.JWTClaims)
 
-	utils.BlacklistToken(token, exp)
+	// ambil expiry langsung dari JWT
+	exp := claims.ExpiresAt.Time
+
+	middleware.BlacklistToken(token, exp)
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
 		"message": "logged out",
 	})
 }
+
+
 
 // ========================================================
 // PROFILE

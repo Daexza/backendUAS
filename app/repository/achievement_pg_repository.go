@@ -1,70 +1,281 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"time"
+	"strconv"
 	"achievements-uas/app/models"
 )
 
-type AchievementPGRepository struct {
-	DB *sql.DB
+/*
+=====================================================
+STRUCT REPOSITORY (NO INTERFACE)
+=====================================================
+*/
+type AchievementPostgresRepository struct {
+	db *sql.DB
 }
 
-func NewAchievementPGRepository(db *sql.DB) *AchievementPGRepository {
-	return &AchievementPGRepository{DB: db}
+/*
+=====================================================
+CONSTRUCTOR
+=====================================================
+*/
+func NewAchievementPostgresRepository(db *sql.DB) *AchievementPostgresRepository {
+	return &AchievementPostgresRepository{db: db}
 }
 
-// CREATE REFERENCE
-func (r *AchievementPGRepository) Create(ref *models.AchievementReference) error {
-	ref.Status = "draft"
-	ref.CreatedAt = time.Now()
-	ref.UpdatedAt = time.Now()
+/*
+=====================================================
+FR-003: Create reference saat prestasi dibuat
+=====================================================
+*/
+func (r *AchievementPostgresRepository) Create(
+	ctx context.Context,
+	ref *models.AchievementReference,
+) error {
 
-	_, err := r.DB.Exec(`
-		INSERT INTO achievement_references 
+	query := `
+		INSERT INTO achievement_references
 		(id, student_id, mongo_achievement_id, status, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6)
-	`, ref.ID, ref.StudentID, ref.MongoAchievementID, ref.Status, ref.CreatedAt, ref.UpdatedAt)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		ref.ID,
+		ref.StudentID,
+		ref.MongoAchievementID,
+		ref.Status,
+		time.Now(),
+		time.Now(),
+	)
 	return err
 }
 
-// UPDATE STATUS (by mongo_id)
-func (r *AchievementPGRepository) UpdateStatusByMongoID(mongoID, status, verifiedBy, note string) error {
-	_, err := r.DB.Exec(`
+/*
+=====================================================
+FR-004: Update status (draft → submitted)
+=====================================================
+*/
+func (r *AchievementPostgresRepository) UpdateStatus(
+	ctx context.Context,
+	mongoID,
+	status string,
+) error {
+
+	query := `
 		UPDATE achievement_references
-		SET status=$2, verified_by=$3, rejection_note=$4, updated_at=$5
-		WHERE mongo_achievement_id=$1
-	`, mongoID, status, verifiedBy, note, time.Now())
+		SET status=$1, updated_at=$2
+		WHERE mongo_achievement_id=$3
+	`
+
+	_, err := r.db.ExecContext(ctx, query, status, time.Now(), mongoID)
 	return err
 }
 
-// HISTORY
-func (r *AchievementPGRepository) AddHistory(h *models.AchievementHistory) error {
-	h.ChangedAt = time.Now()
-	_, err := r.DB.Exec(`
-		INSERT INTO achievement_histories (achievement_id, student_id, status, changed_by, changed_at, notes)
-		VALUES ($1,$2,$3,$4,$5,$6)
-	`, h.AchievementID, h.StudentID, h.Status, h.ChangedBy, h.ChangedAt, h.Notes)
+/*
+=====================================================
+FR-007: Verify prestasi
+=====================================================
+*/
+func (r *AchievementPostgresRepository) SetVerified(
+	ctx context.Context,
+	mongoID,
+	dosenID string,
+) error {
+
+	query := `
+		UPDATE achievement_references
+		SET status='verified',
+		    verified_by=$1,
+		    verified_at=$2,
+		    updated_at=$2
+		WHERE mongo_achievement_id=$3
+	`
+
+	_, err := r.db.ExecContext(ctx, query, dosenID, time.Now(), mongoID)
 	return err
 }
 
-func (r *AchievementPGRepository) GetHistoryByMongoID(id string) ([]models.AchievementHistory, error) {
-	rows, err := r.DB.Query(`
-		SELECT achievement_id, student_id, status, changed_by, changed_at, notes
-		FROM achievement_histories
-		WHERE achievement_id=$1
-		ORDER BY changed_at ASC
-	`, id)
+/*
+=====================================================
+FR-008: Reject prestasi
+=====================================================
+*/
+func (r *AchievementPostgresRepository) SetRejected(
+	ctx context.Context,
+	mongoID,
+	note string,
+) error {
+
+	query := `
+		UPDATE achievement_references
+		SET status='rejected',
+		    rejection_note=$1,
+		    updated_at=$2
+		WHERE mongo_achievement_id=$3
+	`
+
+	_, err := r.db.ExecContext(ctx, query, note, time.Now(), mongoID)
+	return err
+}
+
+/*
+=====================================================
+FR-006: Ambil reference prestasi mahasiswa bimbingan
+=====================================================
+*/
+func (r *AchievementPostgresRepository) FindByStudentIDs(
+	ctx context.Context,
+	studentIDs []string,
+) ([]models.AchievementReference, error) {
+
+	query := `
+		SELECT id, student_id, mongo_achievement_id, status,
+		       created_at, updated_at
+		FROM achievement_references
+		WHERE student_id = ANY($1)
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, studentIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var list []models.AchievementHistory
+	var results []models.AchievementReference
 	for rows.Next() {
-		var h models.AchievementHistory
-		rows.Scan(&h.AchievementID, &h.StudentID, &h.Status, &h.ChangedBy, &h.ChangedAt, &h.Notes)
-		list = append(list, h)
+		var ref models.AchievementReference
+		if err := rows.Scan(
+			&ref.ID,
+			&ref.StudentID,
+			&ref.MongoAchievementID,
+			&ref.Status,
+			&ref.CreatedAt,
+			&ref.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, ref)
 	}
-	return list, nil
+	return results, nil
+}
+/*
+=====================================================
+FR-010: ADMIN - GET ALL ACHIEVEMENTS (REFERENCE)
+=====================================================
+*/
+func (r *AchievementPostgresRepository) GetAll(
+	ctx context.Context,
+	status string,
+	limit, offset int,
+) ([]models.AchievementReference, error) {
+
+	query := `
+		SELECT id, student_id, mongo_achievement_id, status,
+		       created_at, updated_at
+		FROM achievement_references
+		WHERE ($1 = '' OR status = $1)
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, status, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.AchievementReference
+	for rows.Next() {
+		var ref models.AchievementReference
+		if err := rows.Scan(
+			&ref.ID,
+			&ref.StudentID,
+			&ref.MongoAchievementID,
+			&ref.Status,
+			&ref.CreatedAt,
+			&ref.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, ref)
+	}
+	return results, nil
+}
+// =====================================================
+// FR-010: GET ALL REFERENCES (ADMIN, PAGINATION)
+// =====================================================
+func (r *AchievementPostgresRepository) GetAllWithCount(
+	ctx context.Context,
+	status string,
+	studentID string,
+	limit, offset int,
+) ([]models.AchievementReference, int, error) {
+
+	where := "WHERE 1=1"
+	args := []interface{}{}
+	i := 1
+
+	if status != "" {
+		where += " AND status=$" + strconv.Itoa(i)
+		args = append(args, status)
+		i++
+	}
+
+	if studentID != "" {
+		where += " AND student_id=$" + strconv.Itoa(i)
+		args = append(args, studentID)
+		i++
+	}
+
+	// count
+	countQuery := `
+		SELECT COUNT(*)
+		FROM achievement_references
+	` + where
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// data
+	dataQuery := `
+		SELECT id, student_id, mongo_achievement_id, status,
+		       created_at, updated_at
+		FROM achievement_references
+	` + where + `
+		ORDER BY created_at DESC
+		LIMIT $` + strconv.Itoa(i) + `
+		OFFSET $` + strconv.Itoa(i+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, dataQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var results []models.AchievementReference
+	for rows.Next() {
+		var r models.AchievementReference
+		if err := rows.Scan(
+			&r.ID,
+			&r.StudentID,
+			&r.MongoAchievementID,
+			&r.Status,
+			&r.CreatedAt,
+			&r.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		results = append(results, r)
+	}
+
+	return results, total, nil
 }

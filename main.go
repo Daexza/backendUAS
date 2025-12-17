@@ -4,37 +4,88 @@ import (
 	"log"
 
 	"achievements-uas/database"
+	"achievements-uas/app/repository"
 	"achievements-uas/routes"
+	"achievements-uas/services"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
-
 )
 
 func main() {
-	// Load .env file
+	// ===============================
+	// LOAD ENV
+	// ===============================
 	if err := godotenv.Load(); err != nil {
-		log.Println("[WARN] .env file not found, using system environment")
+		log.Println("[WARN] .env file not found, using system env")
 	}
 
-	// Connect PostgreSQL
+	// ===============================
+	// CONNECT DATABASES
+	// ===============================
 	if err := database.ConnectPostgres(); err != nil {
-		log.Fatal("[FATAL] Failed to connect PostgreSQL:", err)
+		log.Fatal("[FATAL] PostgreSQL error:", err)
 	}
 
-	// Connect MongoDB
 	if err := database.ConnectMongo(); err != nil {
-		log.Fatal("[FATAL] Failed to connect MongoDB:", err)
+		log.Fatal("[FATAL] MongoDB error:", err)
 	}
 
-	// Init Fiber App
+	// ===============================
+	// INIT REPOSITORIES
+	// ===============================
+	adminRepo := repository.NewAdminRepository(database.Postgres)
+	roleRepo := repository.NewRoleRepository(database.Postgres)
+	rolePermRepo := repository.NewRolePermissionRepository(database.Postgres)
+	authRepo := repository.NewAuthRepository(database.Postgres)
+
+	studentRepo := repository.NewStudentRepository(database.Postgres)
+
+	achPgRepo := repository.NewAchievementPostgresRepository(database.Postgres)
+	achMongoRepo := repository.NewAchievementMongoRepository(database.MongoDB)
+
+	// ===============================
+	// INIT SERVICES
+	// ===============================
+	authService := services.NewAuthService(authRepo, rolePermRepo)
+
+	adminService := services.NewAdminService(
+		adminRepo,
+		roleRepo,
+		rolePermRepo,
+		achPgRepo,
+		achMongoRepo,
+	)
+
+	achievementService := &services.AchievementService{
+		MongoRepo:   achMongoRepo,
+		PgRepo:      achPgRepo,
+		StudentRepo: studentRepo,
+	}
+
+	reportService := &services.ReportService{
+		MongoRepo:   achMongoRepo,
+		StudentRepo: studentRepo,
+	}
+
+	// ===============================
+	// INIT APP & ROUTES
+	// ===============================
 	app := fiber.New()
 
-	// Register all routes in one file
-	routes.RegisterRoutes(app)
+	routes.SetupRoutes(
+		app,
+		authService,
+		adminService,
+		achievementService,
+		reportService, // ← WAJIB
+	)
 
-	// Start Server
-	log.Println("Server running on :3000")
+	// ===============================
+	// START SERVER
+	// ===============================
+	log.Println("🚀 Server running on :3000")
 	if err := app.Listen(":3000"); err != nil {
-		log.Fatal("[FATAL] Failed to start server:", err)
+		log.Fatal("[FATAL] Server error:", err)
 	}
 }

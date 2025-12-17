@@ -1,17 +1,26 @@
 package services
 
 import (
+	"context"
+	"strconv"
+
 	"achievements-uas/app/models"
 	"achievements-uas/app/repository"
 	"achievements-uas/utils"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type UserAdminService struct {
-	AdminRepo     *repository.AdminRepository
-	RoleRepo      *repository.RoleRepository
-	RolePermRepo  *repository.RolePermissionRepository
+	AdminRepo    *repository.AdminRepository
+	RoleRepo     *repository.RoleRepository
+	RolePermRepo *repository.RolePermissionRepository
+
+	// ===== FR-010 =====
+	AchPgRepo    *repository.AchievementPostgresRepository
+	AchMongoRepo *repository.AchievementMongoRepository
 }
 
 // ==============================================
@@ -21,11 +30,15 @@ func NewAdminService(
 	adminRepo *repository.AdminRepository,
 	roleRepo *repository.RoleRepository,
 	rolePermRepo *repository.RolePermissionRepository,
+	achPgRepo *repository.AchievementPostgresRepository,
+	achMongoRepo *repository.AchievementMongoRepository,
 ) *UserAdminService {
 	return &UserAdminService{
 		AdminRepo:    adminRepo,
 		RoleRepo:     roleRepo,
 		RolePermRepo: rolePermRepo,
+		AchPgRepo:    achPgRepo,
+		AchMongoRepo: achMongoRepo,
 	}
 }
 
@@ -45,7 +58,6 @@ func (s *UserAdminService) Create(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
 	}
 
-	// cek role valid
 	if _, err := s.RoleRepo.FindByID(body.RoleID); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid role_id"})
 	}
@@ -109,7 +121,6 @@ func (s *UserAdminService) Update(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
 	}
 
-	// cek role valid
 	if _, err := s.RoleRepo.FindByID(body.RoleID); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid role_id"})
 	}
@@ -137,107 +148,113 @@ func (s *UserAdminService) Delete(c *fiber.Ctx) error {
 	if err := s.AdminRepo.DeleteUser(c.Params("id")); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed delete user"})
 	}
-	return c.JSON(fiber.Map{"status": "success", "message": "user deleted"})
+	return c.JSON(fiber.Map{"status": "success"})
 }
 
 // ==============================================
-// RESET PASSWORD
+// UPDATE USER PASSWORD (ADMIN)
 // ==============================================
 func (s *UserAdminService) UpdatePassword(c *fiber.Ctx) error {
-	id := c.Params("id")
+	userID := c.Params("id")
 
 	var body struct {
 		NewPassword string `json:"new_password"`
 	}
 
 	if err := c.BodyParser(&body); err != nil || body.NewPassword == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "password required"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "new_password is required",
+		})
 	}
 
-	if _, err := s.AdminRepo.GetByID(id); err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
+	// hash password baru
+	hash, err := utils.HashPassword(body.NewPassword)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "failed hash password",
+		})
 	}
 
-	hash, _ := utils.HashPassword(body.NewPassword)
-
-	if err := s.AdminRepo.UpdatePassword(id, hash); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed update password"})
+	// update ke DB
+	if err := s.AdminRepo.UpdatePassword(userID, hash); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "failed update password",
+		})
 	}
 
-	return c.JSON(fiber.Map{"status": "success", "message": "password updated"})
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"message": "password updated",
+	})
 }
 
-// ==============================================
-// ASSIGN ROLE
-// ==============================================
-func (s *UserAdminService) AssignRole(c *fiber.Ctx) error {
-	id := c.Params("id")
+//
+// =====================================================
+// FR-010: VIEW ALL ACHIEVEMENTS (ADMIN)
+// =====================================================
+func (s *UserAdminService) GetAllAchievements(c *fiber.Ctx) error {
+	ctx := context.Background()
 
-	var body struct {
-		RoleID string `json:"role_id"`
+	status := c.Query("status", "")
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+
+	offset := (page - 1) * limit
+
+	refs, err := s.AchPgRepo.GetAll(ctx, status, limit, offset)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed load references"})
 	}
 
-	if err := c.BodyParser(&body); err != nil || body.RoleID == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "role_id required"})
+	var ids []primitive.ObjectID
+	for _, r := range refs {
+		if oid, err := primitive.ObjectIDFromHex(r.MongoAchievementID); err == nil {
+			ids = append(ids, oid)
+		}
 	}
 
-	// cek role valid
-	if _, err := s.RoleRepo.FindByID(body.RoleID); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid role_id"})
+	data, err := s.AchMongoRepo.FindByIDs(ctx, ids)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed load achievements"})
 	}
 
-	if err := s.AdminRepo.AssignRole(id, body.RoleID); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed assign role"})
-	}
-
-	return c.JSON(fiber.Map{"status": "success", "message": "role updated"})
+	return c.JSON(fiber.Map{"status": "success", "data": data})
 }
 
-// ==============================================
-// CREATE STUDENT PROFILE
-// ==============================================
-func (s *UserAdminService) CreateStudentProfile(c *fiber.Ctx) error {
-	var body models.Student
-	body.ID = uuid.New().String()
+//
+// ================= STUDENTS (ADMIN) =================
+//
 
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
+func (s *UserAdminService) GetAllStudents(c *fiber.Ctx) error {
+	data, err := s.AdminRepo.GetAllStudents()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed get students"})
 	}
-
-	if err := s.AdminRepo.CreateStudent(&body); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed create student profile"})
-	}
-
-	return c.JSON(fiber.Map{"status": "success", "data": body})
+	return c.JSON(fiber.Map{"status": "success", "data": data})
 }
 
-// ==============================================
-// CREATE LECTURER PROFILE
-// ==============================================
-func (s *UserAdminService) CreateLecturerProfile(c *fiber.Ctx) error {
-	var body models.Lecturer
-	body.ID = uuid.New().String()
-
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
+func (s *UserAdminService) GetStudentByID(c *fiber.Ctx) error {
+	data, err := s.AdminRepo.GetStudentByID(c.Params("id"))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "student not found"})
 	}
-
-	if err := s.AdminRepo.CreateLecturer(&body); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed create lecturer profile"})
-	}
-
-	return c.JSON(fiber.Map{"status": "success", "data": body})
+	return c.JSON(fiber.Map{"status": "success", "data": data})
 }
 
-// ==============================================
-// SET ADVISOR
-// ==============================================
+func (s *UserAdminService) GetStudentAchievements(c *fiber.Ctx) error {
+	data, err := s.AdminRepo.GetStudentAchievements(c.Params("id"))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed get achievements"})
+	}
+	return c.JSON(fiber.Map{"status": "success", "data": data})
+}
+
 func (s *UserAdminService) SetAdvisor(c *fiber.Ctx) error {
 	var body struct {
 		AdvisorID string `json:"advisor_id"`
 	}
 
-	if err := c.BodyParser(&body); err != nil || body.AdvisorID == "" {
+	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "advisor_id required"})
 	}
 
@@ -245,59 +262,25 @@ func (s *UserAdminService) SetAdvisor(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "failed set advisor"})
 	}
 
-	return c.JSON(fiber.Map{"status": "success", "message": "advisor set"})
-}
-// ==============================================
-// GET ALL STUDENTS
-// ==============================================
-func (s *UserAdminService) GetAllStudents(c *fiber.Ctx) error {
-	list, err := s.AdminRepo.GetAllStudents()
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed get students"})
-	}
-	return c.JSON(fiber.Map{"status": "success", "data": list})
+	return c.JSON(fiber.Map{"status": "success"})
 }
 
-// ==============================================
-// GET STUDENT BY ID
-// ==============================================
-func (s *UserAdminService) GetStudentByID(c *fiber.Ctx) error {
-	res, err := s.AdminRepo.GetStudentByID(c.Params("id"))
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "student not found"})
-	}
-	return c.JSON(fiber.Map{"status": "success", "data": res})
-}
+//
+// ================= LECTURERS (ADMIN) =================
+//
 
-// ==============================================
-// GET STUDENT ACHIEVEMENTS
-// ==============================================
-func (s *UserAdminService) GetStudentAchievements(c *fiber.Ctx) error {
-	list, err := s.AdminRepo.GetStudentAchievements(c.Params("id"))
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed load achievements"})
-	}
-	return c.JSON(fiber.Map{"status": "success", "data": list})
-}
-
-// ==============================================
-// GET ALL LECTURERS
-// ==============================================
 func (s *UserAdminService) GetAllLecturers(c *fiber.Ctx) error {
-	list, err := s.AdminRepo.GetAllLecturers()
+	data, err := s.AdminRepo.GetAllLecturers()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed get lecturers"})
 	}
-	return c.JSON(fiber.Map{"status": "success", "data": list})
+	return c.JSON(fiber.Map{"status": "success", "data": data})
 }
 
-// ==============================================
-// GET LECTURER ADVISEES
-// ==============================================
 func (s *UserAdminService) GetLecturerAdvisees(c *fiber.Ctx) error {
-	list, err := s.AdminRepo.GetLecturerAdvisees(c.Params("id"))
+	data, err := s.AdminRepo.GetLecturerAdvisees(c.Params("id"))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed get advisees"})
 	}
-	return c.JSON(fiber.Map{"status": "success", "data": list})
+	return c.JSON(fiber.Map{"status": "success", "data": data})
 }
