@@ -11,6 +11,7 @@ import (
 
 type JWTClaims struct {
 	ID          string   `json:"id"`
+	Username        string   `json:"name"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
 	jwt.RegisteredClaims
@@ -18,24 +19,29 @@ type JWTClaims struct {
 
 var ErrTokenInvalid = errors.New("token invalid")
 
-// =====================================================
-// ACCESS TOKEN – menerima PERMISSIONS dari AuthService
-// =====================================================
-func GenerateAccessToken(user *models.User, permissions []string) (string, error) {
+func GenerateAccessToken(user *models.User, roleName string, permissions []string) (string, error) {
+    // Ambil durasi dari env (misal: 15m)
+    expireStr := os.Getenv("JWT_EXPIRE")
+    duration, err := time.ParseDuration(expireStr)
+    if err != nil {
+        duration = time.Hour * 24 // default 24 jam
+    }
 
-	claims := JWTClaims{
-		ID:          user.ID,
-		Role:        user.RoleID,
-		Permissions: permissions,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
+    claims := JWTClaims{
+        ID:          user.ID,
+        Role:        roleName,
+		Username:        user.Username,
+        Permissions: permissions,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
+            IssuedAt:  jwt.NewNumericDate(time.Now()),
+        },
+    }
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 }
+
 
 func ParseAccessToken(tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
@@ -67,6 +73,7 @@ func ValidateAndGetUserID(tokenStr string) (string, error) {
 func GenerateRefreshToken(user *models.User) (string, error) {
 	claims := JWTClaims{
 		ID:   user.ID,
+		Username: user.Username,
 		Role: user.RoleID,
 		Permissions: nil, // refresh token tidak butuh permission
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -95,20 +102,3 @@ func ParseRefreshToken(tokenStr string) (*JWTClaims, error) {
 	return claims, nil
 }
 
-// =====================================================
-// BLACKLIST TOKEN
-// =====================================================
-
-var tokenBlacklist = make(map[string]time.Time)
-
-func BlacklistToken(token string, exp time.Time) {
-	tokenBlacklist[token] = exp
-}
-
-func IsTokenBlacklisted(token string) bool {
-	exp, ok := tokenBlacklist[token]
-	if !ok {
-		return false
-	}
-	return time.Now().Before(exp)
-}

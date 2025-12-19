@@ -47,7 +47,7 @@ func main() {
 	// ===============================
 	// INIT SERVICES
 	// ===============================
-	authService := services.NewAuthService(authRepo, rolePermRepo)
+	authService := services.NewAuthService(authRepo, roleRepo, rolePermRepo)
 
 	adminService := services.NewAdminService(
 		adminRepo,
@@ -60,7 +60,8 @@ func main() {
 	achievementService := &services.AchievementService{
 		MongoRepo:   achMongoRepo,
 		PgRepo:      achPgRepo,
-		StudentRepo: studentRepo,
+		AdminRepo:   adminRepo,
+
 	}
 
 	reportService := &services.ReportService{
@@ -72,6 +73,8 @@ func main() {
 	// INIT APP & ROUTES
 	// ===============================
 	app := fiber.New()
+	// Di main.go
+	app.Static("/uploads", "./uploads")
 
 	routes.SetupRoutes(
 		app,

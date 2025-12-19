@@ -42,3 +42,14 @@ func (r *RoleRepository) FindByID(id string) (*models.Role, error) {
 	}
 	return &role, nil
 }
+func (r *RoleRepository) GetNameByID(id string) (string, error) {
+	var name string
+	err := r.DB.QueryRow(`
+		SELECT name FROM roles WHERE id=$1
+	`, id).Scan(&name)
+
+	if err != nil {
+		return "", err
+	}
+	return name, nil
+}

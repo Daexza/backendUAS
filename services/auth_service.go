@@ -1,31 +1,34 @@
 package services
 
 import (
+	"net/http"
+
 	"achievements-uas/app/repository"
 	"achievements-uas/utils"
-	"achievements-uas/middleware" 
 	"github.com/gofiber/fiber/v2"
-	"net/http"
 )
 
 type AuthService struct {
 	AuthRepo     *repository.AuthRepository
+	RoleRepo     *repository.RoleRepository
 	RolePermRepo *repository.RolePermissionRepository
 }
 
 func NewAuthService(
 	authRepo *repository.AuthRepository,
+	roleRepo *repository.RoleRepository,
 	rolePermRepo *repository.RolePermissionRepository,
 ) *AuthService {
 	return &AuthService{
 		AuthRepo:     authRepo,
+		RoleRepo:     roleRepo,
 		RolePermRepo: rolePermRepo,
 	}
 }
 
-// ========================================================
-// LOGIN
-// ========================================================
+//
+// ======================= LOGIN =======================
+//
 func (s *AuthService) Login(c *fiber.Ctx) error {
 	var body struct {
 		Username string `json:"username"`
@@ -53,14 +56,20 @@ func (s *AuthService) Login(c *fiber.Ctx) error {
 			JSON(fiber.Map{"error": "invalid credentials"})
 	}
 
-	// ============= GET PERMISSIONS ============
+	// ===== ambil ROLE NAME =====
+	roleName, err := s.RoleRepo.GetNameByID(user.RoleID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed load role"})
+	}
+
+	// ===== ambil PERMISSIONS =====
 	perms, err := s.RolePermRepo.GetPermissionsByRole(user.RoleID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed fetch permissions"})
 	}
 
-	// ============= GENERATE TOKEN ============
-	accessToken, err := utils.GenerateAccessToken(user, perms)
+	// ===== generate token =====
+	accessToken, err := utils.GenerateAccessToken(user, roleName, perms)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed generate token"})
 	}
@@ -78,15 +87,15 @@ func (s *AuthService) Login(c *fiber.Ctx) error {
 			"id":          user.ID,
 			"username":    user.Username,
 			"email":       user.Email,
-			"role_id":     user.RoleID,
+			"role":        roleName,
 			"permissions": perms,
 		},
 	})
 }
 
-// ========================================================
-// REFRESH TOKEN
-// ========================================================
+//
+// ======================= REFRESH =======================
+//
 func (s *AuthService) Refresh(c *fiber.Ctx) error {
 	var body struct {
 		RefreshToken string `json:"refresh_token"`
@@ -106,12 +115,17 @@ func (s *AuthService) Refresh(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "user not found"})
 	}
 
+	roleName, err := s.RoleRepo.GetNameByID(user.RoleID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed load role"})
+	}
+
 	perms, err := s.RolePermRepo.GetPermissionsByRole(user.RoleID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed fetch permissions"})
 	}
 
-	accessToken, err := utils.GenerateAccessToken(user, perms)
+	accessToken, err := utils.GenerateAccessToken(user, roleName, perms)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed generate token"})
 	}
@@ -122,50 +136,45 @@ func (s *AuthService) Refresh(c *fiber.Ctx) error {
 	})
 }
 
-// ========================================================
-// LOGOUT
-// ========================================================
 func (s *AuthService) Logout(c *fiber.Ctx) error {
-	token := c.Locals("token").(string)
-	claims := c.Locals("claims").(*utils.JWTClaims)
+    // Ambil token dari Locals (yang sudah dibersihkan oleh middleware)
+    tokenString, ok := c.Locals("token").(string)
+    if !ok {
+        return c.Status(500).JSON(fiber.Map{"error": "Token not found in context"})
+    }
 
-	// ambil expiry langsung dari JWT
-	exp := claims.ExpiresAt.Time
+    claims := c.Locals("claims").(*utils.JWTClaims)
+    
+    // Gunakan waktu expiry dari token
+    utils.BlacklistToken(tokenString, claims.ExpiresAt.Time)
 
-	middleware.BlacklistToken(token, exp)
-
-	return c.JSON(fiber.Map{
-		"status":  "success",
-		"message": "logged out",
-	})
+    return c.JSON(fiber.Map{"message": "Logout success"})
 }
 
-
-
-// ========================================================
-// PROFILE
-// ========================================================
 func (s *AuthService) Profile(c *fiber.Ctx) error {
-	claims := c.Locals("claims").(*utils.JWTClaims)
+    // Ambil data dari Locals
+    raw := c.Locals("claims")
+    
+    // Safe Assertion: Pastikan menggunakan pointer (*)
+    claims, ok := raw.(*utils.JWTClaims)
+    if !ok {
+        return c.Status(500).JSON(fiber.Map{
+            "error": "Internal Server Error",
+            "message": "Failed to parse authentication claims",
+        })
+    }
 
-	user, err := s.AuthRepo.GetProfile(claims.ID)
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
-	}
+    // Ambil user dari database menggunakan claims.ID
+    user, err := s.AuthRepo.GetProfile(claims.ID)
+    if err != nil {
+        return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+    }
 
-	perms, err := s.RolePermRepo.GetPermissionsByRole(user.RoleID)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed load permissions"})
-	}
-
-	return c.JSON(fiber.Map{
-		"status": "success",
-		"data": fiber.Map{
-			"id":          user.ID,
-			"username":    user.Username,
-			"email":       user.Email,
-			"role_id":     user.RoleID,
-			"permissions": perms,
-		},
-	})
+    return c.Status(200).JSON(fiber.Map{
+        "status": "success",
+        "data": fiber.Map{
+            "user": user,
+            "role": claims.Role,
+        },
+    })
 }

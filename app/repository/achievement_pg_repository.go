@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"time"
+	"fmt"
 	"strconv"
 	"achievements-uas/app/models"
 )
@@ -31,51 +32,108 @@ func NewAchievementPostgresRepository(db *sql.DB) *AchievementPostgresRepository
 FR-003: Create reference saat prestasi dibuat
 =====================================================
 */
-func (r *AchievementPostgresRepository) Create(
-	ctx context.Context,
-	ref *models.AchievementReference,
-) error {
-
+func (r *AchievementPostgresRepository) Create(ctx context.Context, ref models.AchievementReference) error {
 	query := `
-		INSERT INTO achievement_references
-		(id, student_id, mongo_achievement_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO achievement_references (
+			id, 
+			student_id, 
+			mongo_achievement_id, 
+			status, 
+			created_at, 
+			updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6)
 	`
+
+	// Pastikan ID menggunakan UUID baru jika belum diset
+	if ref.ID == "" {
+		// Kamu bisa menggunakan library google/uuid atau membiarkan DB menanganinya
+		// Di sini kita asumsikan DB memiliki default uuid_generate_v4() atau diset di service
+	}
 
 	_, err := r.db.ExecContext(
-		ctx,
-		query,
-		ref.ID,
-		ref.StudentID,
-		ref.MongoAchievementID,
-		ref.Status,
-		time.Now(),
-		time.Now(),
+		ctx, 
+		query, 
+		ref.ID, 
+		ref.StudentID, 
+		ref.MongoAchievementID, 
+		ref.Status, 
+		ref.CreatedAt, 
+		ref.UpdatedAt,
 	)
+
 	return err
 }
 
-/*
-=====================================================
-FR-004: Update status (draft → submitted)
-=====================================================
-*/
-func (r *AchievementPostgresRepository) UpdateStatus(
-	ctx context.Context,
-	mongoID,
-	status string,
-) error {
+// app/repository/achievement_postgres_repository.go
+func (r *AchievementPostgresRepository) UpdateStatus(ctx context.Context, mongoID string, status string) error {
+    query := `
+        UPDATE achievement_references 
+        SET status = $1, updated_at = $2 
+        WHERE mongo_achievement_id = $3
+    `
+    // Eksekusi update
+    result, err := r.db.ExecContext(ctx, query, status, time.Now(), mongoID)
+    if err != nil {
+        return err
+    }
 
-	query := `
-		UPDATE achievement_references
-		SET status=$1, updated_at=$2
-		WHERE mongo_achievement_id=$3
-	`
+    // DEBUG: Cek apakah ada baris yang terpengaruh
+    rows, _ := result.RowsAffected()
+    if rows == 0 {
+        return fmt.Errorf("no rows updated for mongo_id: %s", mongoID)
+    }
 
-	_, err := r.db.ExecContext(ctx, query, status, time.Now(), mongoID)
-	return err
+    return nil
 }
 
+func (r *AchievementPostgresRepository) UpdateTimestamp(ctx context.Context, mongoID string) error {
+    query := `UPDATE achievement_references SET updated_at = NOW() WHERE mongo_achievement_id = $1`
+    _, err := r.db.ExecContext(ctx, query, mongoID)
+    return err
+}
+// achievement_repository_pg.go
+
+func (r *AchievementPostgresRepository) UpdateToSubmitted(ctx context.Context, mongoID string) error {
+    // Query ini memastikan status berubah DAN submitted_at terisi jam sekarang
+    query := `
+        UPDATE achievement_references 
+        SET 
+            status = 'submitted', 
+            submitted_at = NOW(), 
+            updated_at = NOW() 
+        WHERE mongo_achievement_id = $1`
+    
+    _, err := r.db.ExecContext(ctx, query, mongoID)
+    return err
+}
+// Di achievement_repository_pg.go
+
+func (r *AchievementPostgresRepository) UpdateToVerified(ctx context.Context, mongoID string, dosenUUID string) error {
+    query := `
+        UPDATE achievement_references 
+        SET 
+            status = 'verified', 
+            verified_at = NOW(), 
+            verified_by = $1, 
+            updated_at = NOW() 
+        WHERE mongo_achievement_id = $2`
+    
+    _, err := r.db.ExecContext(ctx, query, dosenUUID, mongoID)
+    return err
+}
+func (r *AchievementPostgresRepository) UpdateToRejected(ctx context.Context, mongoID string, dosenUUID string, reason string) error {
+    query := `
+        UPDATE achievement_references 
+        SET 
+            status = 'rejected', 
+            rejection_note = $1, 
+            verified_by = $2, 
+            updated_at = NOW() 
+        WHERE mongo_achievement_id = $3`
+    
+    _, err := r.db.ExecContext(ctx, query, reason, dosenUUID, mongoID)
+    return err
+}
 /*
 =====================================================
 FR-007: Verify prestasi
